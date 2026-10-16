@@ -5,7 +5,6 @@ import { getOutboxSummary, getOutboxEntries, subscribe, flushOutbox, deleteFaile
 import type { SvApartment, AptType } from '@/lib/database.types'
 import { useAuth } from '@/modules/core/store'
 import { useI18n } from '@/i18n'
-import { friendlyMessage } from '@/lib/errors'
 import { isToday } from '@/lib/format'
 import { Search, CheckCircle2, ChevronRight, RefreshCw, Trash2, AlertTriangle } from 'lucide-react'
 

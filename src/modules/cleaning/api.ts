@@ -45,10 +45,6 @@ export async function queueCleaningOffline(params: {
   })
 }
 
-export async function retryOutbox(userId: string): Promise<void> {
-  await flushOutbox(userId)
-}
-
 export function isNetworkError(error: unknown): boolean {
   return toApiError(error).isNetwork
 }

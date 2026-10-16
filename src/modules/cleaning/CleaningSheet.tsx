@@ -226,7 +226,7 @@ export function CleaningSheet({ backTo }: { backTo?: string }) {
           <button onClick={goBack} className="flex-1 bg-app text-ink rounded-xl py-3 font-medium">{t.cleaning.cancel}</button>
           <button
             onClick={handleConfirm}
-            disabled={submitting || (needsStaff && selectedStaff.length === 0) || !!loadError}
+            disabled={submitting || (needsStaff && selectedStaff.length === 0)}
             className="flex-1 bg-accent text-white rounded-xl py-3 font-medium disabled:opacity-40 flex items-center justify-center gap-2">
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {t.cleaning.confirm}

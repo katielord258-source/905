@@ -58,7 +58,7 @@ export async function addOutboxEntry(entry: Omit<OutboxEntry, 'status' | 'lastEr
   notify()
 }
 
-export async function removeOutboxEntry(id: string): Promise<void> {
+async function removeOutboxEntry(id: string): Promise<void> {
   await update<OutboxEntry[]>(OUTBOX_KEY, (existing) =>
     (existing ?? []).filter((e) => e.id !== id),
   )
@@ -148,19 +148,21 @@ async function updateOutboxEntry(id: string, mutate: (e: OutboxEntry) => void): 
 }
 
 let intervalId: ReturnType<typeof setInterval> | null = null
+let onlineHandler: (() => void) | null = null
+let visibleHandler: (() => void) | null = null
 
 export function startOutboxSync(userId: string): void {
   stopOutboxSync()
 
   flushOutbox(userId).catch(() => {})
 
-  const onOnline = () => flushOutbox(userId).catch(() => {})
-  const onVisible = () => {
+  onlineHandler = () => flushOutbox(userId).catch(() => {})
+  visibleHandler = () => {
     if (document.visibilityState === 'visible') flushOutbox(userId).catch(() => {})
   }
 
-  window.addEventListener('online', onOnline)
-  document.addEventListener('visibilitychange', onVisible)
+  window.addEventListener('online', onlineHandler)
+  document.addEventListener('visibilitychange', visibleHandler)
 
   intervalId = setInterval(async () => {
     const summary = await getOutboxSummary(userId)
@@ -174,5 +176,13 @@ export function stopOutboxSync(): void {
   if (intervalId !== null) {
     clearInterval(intervalId)
     intervalId = null
+  }
+  if (onlineHandler) {
+    window.removeEventListener('online', onlineHandler)
+    onlineHandler = null
+  }
+  if (visibleHandler) {
+    document.removeEventListener('visibilitychange', visibleHandler)
+    visibleHandler = null
   }
 }
