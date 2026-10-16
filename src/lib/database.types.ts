@@ -111,6 +111,7 @@ export interface Incident {
   resolved_at: string | null
   resolution_note: string | null
   writeoff_move_id: number | null
+  client_op_id: string | null
 }
 
 export interface SvApartment {

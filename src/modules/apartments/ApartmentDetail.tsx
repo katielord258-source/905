@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { fetchApartmentById, fetchNorms, fetchNotes, addNote } from '@/modules/apartments/api'
 import type { SvApartment, SvNorm, ApartmentNote, NormType } from '@/lib/database.types'
+import { useAuth } from '@/modules/core/store'
 import { useI18n } from '@/i18n'
 import { formatDateTime, isToday, formatQty } from '@/lib/format'
 import { ArrowLeft, Wrench, Sparkles, ClipboardList, Send, CheckCircle2 } from 'lucide-react'
@@ -19,6 +20,7 @@ export function ApartmentDetail() {
   }
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const profile = useAuth((s) => s.profile)
   const aptId = Number(id)
   const [apartment, setApartment] = useState<SvApartment | null>(null)
   const [norms, setNorms] = useState<SvNorm[]>([])
@@ -29,12 +31,12 @@ export function ApartmentDetail() {
   const [sendingNote, setSendingNote] = useState(false)
 
   useEffect(() => {
-    if (!aptId) return
-    Promise.all([fetchApartmentById(aptId), fetchNorms(aptId), fetchNotes(aptId)])
+    if (!aptId || !profile) return
+    Promise.all([fetchApartmentById(aptId), fetchNorms(profile.id, aptId), fetchNotes(aptId)])
       .then(([a, n, no]) => { setApartment(a); setNorms(n); setNotes(no) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [aptId])
+  }, [aptId, profile?.id])
 
   const groupedNorms = useMemo(() => {
     const map = new Map<NormType, SvNorm[]>()

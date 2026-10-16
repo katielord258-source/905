@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchApartments } from '@/modules/apartments/api'
-import { getPendingOutbox } from '@/lib/outbox'
+import { getOutboxSummary, getOutboxEntries, subscribe, flushOutbox, deleteFailedEntry, type OutboxEntry } from '@/lib/outbox'
 import type { SvApartment, AptType } from '@/lib/database.types'
+import { useAuth } from '@/modules/core/store'
 import { useI18n } from '@/i18n'
+import { friendlyMessage } from '@/lib/errors'
 import { isToday } from '@/lib/format'
-import { Search, CheckCircle2, ChevronRight } from 'lucide-react'
+import { Search, CheckCircle2, ChevronRight, RefreshCw, Trash2, AlertTriangle } from 'lucide-react'
 
 const typeOrder: AptType[] = ['studio', '1br', '2br']
 
@@ -19,19 +21,50 @@ export function ApartmentList() {
     '2br': t.apartments.type2br,
   }
   const navigate = useNavigate()
+  const profile = useAuth((s) => s.profile)
   const [apartments, setApartments] = useState<SvApartment[]>([])
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [loading, setLoading] = useState(true)
   const [pendingCount, setPendingCount] = useState(0)
+  const [failedCount, setFailedCount] = useState(0)
+  const [failedEntries, setFailedEntries] = useState<OutboxEntry[]>([])
+  const [retrying, setRetrying] = useState(false)
 
   useEffect(() => {
-    fetchApartments()
+    if (!profile) return
+    fetchApartments(profile.id)
       .then(setApartments)
       .catch(() => {})
       .finally(() => setLoading(false))
-    getPendingOutbox().then((e) => setPendingCount(e.length))
-  }, [])
+
+    const refresh = () => {
+      getOutboxSummary(profile.id).then((s) => {
+        setPendingCount(s.pending)
+        setFailedCount(s.failed)
+      })
+      getOutboxEntries(profile.id).then((entries) => {
+        setFailedEntries(entries.filter((e) => e.status === 'failed'))
+      })
+    }
+    refresh()
+    const unsub = subscribe(refresh)
+    return unsub
+  }, [profile?.id])
+
+  const handleRetry = async () => {
+    if (!profile) return
+    setRetrying(true)
+    try {
+      await flushOutbox(profile.id)
+    } finally {
+      setRetrying(false)
+    }
+  }
+
+  const handleDeleteFailed = async (id: string) => {
+    await deleteFailedEntry(id)
+  }
 
   const grouped = useMemo(() => {
     const filtered = apartments.filter((a) => {
@@ -75,8 +108,34 @@ export function ApartmentList() {
       </div>
 
       {pendingCount > 0 && (
-        <div className="mb-4 bg-warn-soft border border-line rounded-xl px-4 py-2.5 text-sm text-warn">
-          {t.cleaning.pending}: {n(String(pendingCount))}
+        <div className="mb-3 bg-warn-soft border border-line rounded-xl px-4 py-2.5 text-sm text-warn flex items-center justify-between">
+          <span>{t.errors.outboxQueued}: {n(String(pendingCount))}</span>
+          <button onClick={handleRetry} disabled={retrying} className="flex items-center gap-1 text-xs font-medium text-warn disabled:opacity-40">
+            <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
+            {t.errors.outboxRetry}
+          </button>
+        </div>
+      )}
+
+      {failedCount > 0 && (
+        <div className="mb-3 bg-bad-soft border border-line rounded-xl px-4 py-2.5 space-y-2">
+          <div className="flex items-center gap-2 text-sm text-bad">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{t.errors.outboxFailed}: {n(String(failedCount))}</span>
+          </div>
+          {failedEntries.map((entry) => (
+            <div key={entry.id} className="flex items-center justify-between gap-2 text-xs text-bad bg-surface rounded-lg px-3 py-2">
+              <span className="truncate flex-1">{entry.lastError ?? 'Error'}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={handleRetry} disabled={retrying} className="font-medium text-warn disabled:opacity-40">
+                  {t.errors.outboxRetry}
+                </button>
+                <button onClick={() => handleDeleteFailed(entry.id)} className="font-medium text-bad">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

@@ -55,4 +55,12 @@ export async function swrFetchWithFallback<T>(
   }
 }
 
+export function cacheKey(userId: string, name: string): string {
+  return `sv_${userId}_${name}`
+}
+
+export function normCacheKey(userId: string, apartmentId: number): string {
+  return `sv_${userId}_norms_${apartmentId}`
+}
+
 export { readCache, writeCache }

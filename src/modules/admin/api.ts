@@ -258,7 +258,7 @@ export async function fetchAllContacts(): Promise<Contact[]> {
 export async function fetchAllIncidents(): Promise<Incident[]> {
   const { data, error } = await supabase
     .from('incidents')
-    .select('id,apartment_id,item_id,free_text,kind,qty,status,photo_paths,comment,created_by,created_at,resolved_by,resolved_at,resolution_note,writeoff_move_id')
+    .select('id,apartment_id,item_id,free_text,kind,qty,status,photo_paths,comment,created_by,created_at,resolved_by,resolved_at,resolution_note,writeoff_move_id,client_op_id')
     .order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
   return data ?? []

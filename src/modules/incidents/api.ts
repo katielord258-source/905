@@ -1,21 +1,22 @@
 import { supabase } from '@/lib/supabase'
 import type { Incident, IncidentKind, SvItem } from '@/lib/database.types'
+import { toApiError } from '@/lib/errors'
 
 export async function fetchItems(): Promise<SvItem[]> {
   const { data, error } = await supabase
     .from('sv_items')
     .select('id,name,category,base_unit')
     .order('name')
-  if (error) throw new Error(error.message)
+  if (error) throw error
   return data ?? []
 }
 
 export async function fetchMyIncidents(): Promise<Incident[]> {
   const { data, error } = await supabase
     .from('incidents')
-    .select('id,apartment_id,item_id,free_text,kind,qty,status,photo_paths,comment,created_by,created_at,resolved_by,resolved_at,resolution_note,writeoff_move_id')
+    .select('id,apartment_id,item_id,free_text,kind,qty,status,photo_paths,comment,created_by,created_at,resolved_by,resolved_at,resolution_note,writeoff_move_id,client_op_id')
     .order('created_at', { ascending: false })
-  if (error) throw new Error(error.message)
+  if (error) throw error
   return data ?? []
 }
 
@@ -27,6 +28,7 @@ export async function createIncident(params: {
   qty: number
   comment: string | null
   photoPaths: string[]
+  clientOpId: string
 }): Promise<void> {
   const { error } = await supabase.from('incidents').insert({
     apartment_id: params.apartmentId,
@@ -37,8 +39,18 @@ export async function createIncident(params: {
     comment: params.comment,
     photo_paths: params.photoPaths,
     status: 'new',
+    client_op_id: params.clientOpId,
   })
-  if (error) throw new Error(error.message)
+  if (error) {
+    const apiError = toApiError(error)
+    if (apiError.code === '23505') return
+    throw error
+  }
+}
+
+export async function cleanupPhotos(photoPaths: string[]): Promise<void> {
+  if (photoPaths.length === 0) return
+  await supabase.storage.from('incident-photos').remove(photoPaths)
 }
 
 export async function uploadIncidentPhoto(
@@ -52,7 +64,7 @@ export async function uploadIncidentPhoto(
   const { error } = await supabase.storage
     .from('incident-photos')
     .upload(path, compressed, { contentType: 'image/jpeg' })
-  if (error) throw new Error(error.message)
+  if (error) throw error
   return path
 }
 

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import type { CleaningResult } from '@/lib/database.types'
 import { addOutboxEntry, flushOutbox } from '@/lib/outbox'
+import { toApiError } from '@/lib/errors'
 
 export async function completeCleaning(params: {
   apartmentId: number
@@ -23,6 +24,7 @@ export async function completeCleaning(params: {
 }
 
 export async function queueCleaningOffline(params: {
+  userId: string
   apartmentId: number
   cleanedAt: string
   clientOpId: string
@@ -32,11 +34,21 @@ export async function queueCleaningOffline(params: {
 }): Promise<void> {
   await addOutboxEntry({
     id: crypto.randomUUID(),
-    ...params,
+    userId: params.userId,
+    apartmentId: params.apartmentId,
+    cleanedAt: params.cleanedAt,
+    clientOpId: params.clientOpId,
+    staffIds: params.staffIds,
+    leadStaffId: params.leadStaffId,
+    note: params.note,
     createdAt: Date.now(),
   })
 }
 
-export async function retryOutbox(): Promise<void> {
-  await flushOutbox()
+export async function retryOutbox(userId: string): Promise<void> {
+  await flushOutbox(userId)
+}
+
+export function isNetworkError(error: unknown): boolean {
+  return toApiError(error).isNetwork
 }

@@ -17,7 +17,7 @@ import { useAuth } from '@/modules/core/store'
 import { useI18n } from '@/i18n'
 import { formatDateTime, isToday, formatQty } from '@/lib/format'
 import { toast, errorMessage } from '@/lib/toast'
-import { getPendingOutbox } from '@/lib/outbox'
+import { getOutboxSummary, subscribe, flushOutbox } from '@/lib/outbox'
 import { CircleCheck as CheckCircle2, Wrench, Search, Send, Camera, Video, X, FileText, Loader as Loader2, MessageCircle, RefreshCw } from 'lucide-react'
 
 const normTypeOrder: NormType[] = ['asset_standing', 'turnover_replenish', 'cleaning_consumption']
@@ -44,6 +44,7 @@ export function QrApartmentPage() {
   const [notFound, setNotFound] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
   const [pendingCount, setPendingCount] = useState(0)
+  const [failedCount, setFailedCount] = useState(0)
   const [tab, setTab] = useState<'norms' | 'comments' | 'whatsapp' | 'history'>('norms')
   const [cleaningEvents, setCleaningEvents] = useState<SvCleaningEvent[]>([])
   const [search, setSearch] = useState('')
@@ -58,10 +59,10 @@ export function QrApartmentPage() {
   const [noteFileUrls, setNoteFileUrls] = useState<Map<string, string>>(new Map())
 
   const loadAll = useCallback(async () => {
-    if (!aptId) return
+    if (!aptId || !profile) return
     const [apt, nr, it, no, ct] = await Promise.all([
       fetchApartment(aptId),
-      fetchNorms(aptId),
+      fetchNorms(profile.id, aptId),
       fetchItems(),
       fetchNotes(aptId),
       fetchWhatsappContacts(),
@@ -75,7 +76,7 @@ export function QrApartmentPage() {
     setContacts(ct)
     setCleaningEvents(ce)
     setLastUpdated(new Date())
-  }, [aptId])
+  }, [aptId, profile?.id])
 
   useEffect(() => {
     if (!aptId) return
@@ -83,8 +84,18 @@ export function QrApartmentPage() {
     loadAll()
       .catch((e) => toast(errorMessage(e), 'error'))
       .finally(() => setLoading(false))
-    getPendingOutbox().then((entries) => setPendingCount(entries.length))
-  }, [aptId, loadAll])
+    if (profile) {
+      const refreshOutbox = () => {
+        getOutboxSummary(profile.id).then((s) => {
+          setPendingCount(s.pending)
+          setFailedCount(s.failed)
+        })
+      }
+      refreshOutbox()
+      const unsub = subscribe(refreshOutbox)
+      return unsub
+    }
+  }, [aptId, loadAll, profile?.id])
 
   useEffect(() => {
     const onVisible = () => { if (document.visibilityState === 'visible') loadAll().catch(() => {}) }
@@ -297,21 +308,21 @@ export function QrApartmentPage() {
               />
               <button
                 onClick={() => photoInputRef.current?.click()}
-                disabled={uploadingFile}
+                disabled={uploadingFile || !navigator.onLine}
                 className="bg-surface border border-line rounded-xl px-3 py-2.5 disabled:opacity-40"
               >
                 {uploadingFile ? <Loader2 className="w-4 h-4 animate-spin text-muted" /> : <Camera className="w-4 h-4 text-muted" />}
               </button>
               <button
                 onClick={() => videoInputRef.current?.click()}
-                disabled={uploadingFile}
+                disabled={uploadingFile || !navigator.onLine}
                 className="bg-surface border border-line rounded-xl px-3 py-2.5 disabled:opacity-40"
               >
                 <Video className="w-4 h-4 text-muted" />
               </button>
               <button
                 onClick={() => handleAddNote(null)}
-                disabled={sendingNote || !noteText.trim()}
+                disabled={sendingNote || !noteText.trim() || !navigator.onLine}
                 className="bg-accent text-white rounded-xl px-4 py-2.5 disabled:opacity-40"
               >
                 <Send className="w-4 h-4" />
@@ -407,8 +418,15 @@ export function QrApartmentPage() {
             {t.qr.reportBreakdown}
           </button>
         </div>
-        {pendingCount > 0 && (
-          <p className="text-center text-xs text-warn mt-1">{t.qr.pendingOutbox}: {n(String(pendingCount))}</p>
+        {(pendingCount > 0 || failedCount > 0) && (
+          <div className="text-center text-xs mt-1 space-y-1">
+            {pendingCount > 0 && (
+              <p className="text-warn">{t.errors.outboxQueued}: {n(String(pendingCount))}</p>
+            )}
+            {failedCount > 0 && (
+              <p className="text-bad">{t.errors.outboxFailed}: {n(String(failedCount))}</p>
+            )}
+          </div>
         )}
       </div>
     </div>

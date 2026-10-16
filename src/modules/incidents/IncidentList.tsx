@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchMyIncidents } from '@/modules/incidents/api'
 import { fetchApartments } from '@/modules/apartments/api'
+import { useAuth } from '@/modules/core/store'
 import type { Incident, SvApartment, IncidentStatus, IncidentKind } from '@/lib/database.types'
 import { useI18n } from '@/i18n'
 import { formatDateTime } from '@/lib/format'
@@ -34,16 +35,18 @@ export function IncidentList() {
     other: t.incidents.kindOther,
   }
   const navigate = useNavigate()
+  const profile = useAuth((s) => s.profile)
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [apartments, setApartments] = useState<SvApartment[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([fetchMyIncidents(), fetchApartments()])
+    if (!profile) return
+    Promise.all([fetchMyIncidents(), fetchApartments(profile.id)])
       .then(([inc, apts]) => { setIncidents(inc); setApartments(apts) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [profile?.id])
 
   const aptMap = new Map(apartments.map((a) => [a.id, a.code]))
 

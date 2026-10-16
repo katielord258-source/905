@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchApartments } from '@/modules/apartments/api'
-import { fetchItems, createIncident, uploadIncidentPhoto } from '@/modules/incidents/api'
+import { fetchItems, createIncident, uploadIncidentPhoto, cleanupPhotos } from '@/modules/incidents/api'
 import type { SvApartment, SvItem, IncidentKind } from '@/lib/database.types'
 import { useAuth } from '@/modules/core/store'
 import { useI18n } from '@/i18n'
+import { friendlyMessage } from '@/lib/errors'
 import { ArrowLeft, Camera, X, Loader2 } from 'lucide-react'
 
 export function IncidentForm({ backTo }: { backTo?: string }) {
@@ -33,13 +34,16 @@ export function IncidentForm({ backTo }: { backTo?: string }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const clientOpIdRef = useRef<string>(crypto.randomUUID())
+  const isOnline = navigator.onLine
 
   useEffect(() => {
-    Promise.all([fetchApartments(), fetchItems()])
+    if (!profile) return
+    Promise.all([fetchApartments(profile.id), fetchItems()])
       .then(([a, i]) => { setApartments(a); setItems(i) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [profile?.id])
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []).slice(0, 3 - photos.length)
@@ -56,15 +60,29 @@ export function IncidentForm({ backTo }: { backTo?: string }) {
   const handleSubmit = async () => {
     if (!aptId) { setError(t.incidents.apartment); return }
     setSubmitting(true); setError(null)
+    const photoPaths: string[] = []
     try {
-      const photoPaths: string[] = []
       if (photos.length > 0 && profile) {
         for (const file of photos) photoPaths.push(await uploadIncidentPhoto(profile.id, file))
       }
-      await createIncident({ apartmentId: aptId, itemId, freeText: freeText.trim() || null, kind, qty: Number(qty) || 1, comment: comment.trim() || null, photoPaths })
+      await createIncident({
+        apartmentId: aptId,
+        itemId,
+        freeText: freeText.trim() || null,
+        kind,
+        qty: Number(qty) || 1,
+        comment: comment.trim() || null,
+        photoPaths,
+        clientOpId: clientOpIdRef.current,
+      })
       if (backTo) navigate(backTo)
       else navigate('/sv/incidents')
-    } catch (e) { setError(String(e)) } finally { setSubmitting(false) }
+    } catch (e) {
+      if (photoPaths.length > 0) {
+        await cleanupPhotos(photoPaths).catch(() => {})
+      }
+      setError(friendlyMessage(e))
+    } finally { setSubmitting(false) }
   }
 
   if (loading) return <div className="px-4 pt-8 text-center text-muted">{t.app.loading}</div>
@@ -122,7 +140,7 @@ export function IncidentForm({ backTo }: { backTo?: string }) {
                 </button>
               </div>
             ))}
-            {photos.length < 3 && (
+            {photos.length < 3 && isOnline && (
               <button onClick={() => fileInputRef.current?.click()} className="w-20 h-20 border-2 border-dashed border-line rounded-xl flex items-center justify-center text-muted hover:border-accent">
                 <Camera className="w-6 h-6" />
               </button>
@@ -135,10 +153,10 @@ export function IncidentForm({ backTo }: { backTo?: string }) {
       <div className="fixed bottom-16 left-0 right-0 bg-surface border-t border-line px-4 py-3 z-30">
         <div className="max-w-lg mx-auto flex gap-3">
           <button onClick={() => backTo ? navigate(backTo) : navigate(-1)} className="flex-1 bg-app text-ink rounded-xl py-3 font-medium">{t.incidents.cancel}</button>
-          <button onClick={handleSubmit} disabled={submitting}
+          <button onClick={handleSubmit} disabled={submitting || !isOnline}
             className="flex-1 bg-accent text-white rounded-xl py-3 font-medium disabled:opacity-40 flex items-center justify-center gap-2">
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {t.incidents.submit}
+            {isOnline ? t.incidents.submit : t.errors.needsNetworkAction}
           </button>
         </div>
       </div>

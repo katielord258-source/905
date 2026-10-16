@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { fetchNorms, fetchStaff } from '@/modules/apartments/api'
-import { completeCleaning, queueCleaningOffline } from '@/modules/cleaning/api'
+import { completeCleaning, queueCleaningOffline, isNetworkError } from '@/modules/cleaning/api'
+import { useAuth } from '@/modules/core/store'
 import type { SvNorm, SvStaff, NormType, CleaningResult } from '@/lib/database.types'
 import { useI18n } from '@/i18n'
+import { friendlyMessage } from '@/lib/errors'
 import { formatQty } from '@/lib/format'
-import { X, Check, Loader2, AlertTriangle, Star } from 'lucide-react'
+import { X, Check, Loader2, AlertTriangle, Star, RefreshCw } from 'lucide-react'
 
 const writeoffTypes: NormType[] = ['turnover_replenish', 'cleaning_consumption']
 
@@ -13,11 +15,13 @@ export function CleaningSheet({ backTo }: { backTo?: string }) {
   const { t, n } = useI18n()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const profile = useAuth((s) => s.profile)
   const aptId = Number(id)
   const goBack = () => navigate(backTo ?? `/sv/apartments/${aptId}`)
   const [norms, setNorms] = useState<SvNorm[]>([])
   const [staff, setStaff] = useState<SvStaff[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedStaff, setSelectedStaff] = useState<number[]>([])
   const [leadStaffId, setLeadStaffId] = useState<number | null>(null)
   const [note, setNote] = useState('')
@@ -25,15 +29,34 @@ export function CleaningSheet({ backTo }: { backTo?: string }) {
   const [result, setResult] = useState<CleaningResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [offline, setOffline] = useState(false)
+  const [goBackTimer, setGoBackTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const clientOpIdRef = useRef<string>(crypto.randomUUID())
 
+  const loadReferenceData = async () => {
+    if (!aptId || !profile) return
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const [nr, s] = await Promise.all([fetchNorms(profile.id, aptId), fetchStaff(profile.id)])
+      setNorms(nr)
+      setStaff(s)
+    } catch (e) {
+      setLoadError(friendlyMessage(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    if (!aptId) return
-    Promise.all([fetchNorms(aptId), fetchStaff()])
-      .then(([n, s]) => { setNorms(n); setStaff(s) })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [aptId])
+    loadReferenceData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aptId, profile?.id])
+
+  useEffect(() => {
+    return () => {
+      if (goBackTimer) clearTimeout(goBackTimer)
+    }
+  }, [goBackTimer])
 
   const writeoffItems = useMemo(() => norms.filter((nr) => writeoffTypes.includes(nr.norm_type)), [norms])
   const needsStaff = writeoffItems.length > 0
@@ -55,18 +78,45 @@ export function CleaningSheet({ backTo }: { backTo?: string }) {
 
   const handleConfirm = async () => {
     if (needsStaff && selectedStaff.length === 0) { setError(t.cleaning.needLead); return }
+    if (!profile) return
     setSubmitting(true)
     setError(null)
     const cleanedAt = new Date().toISOString()
-    const params = { apartmentId: aptId, cleanedAt, clientOpId: clientOpIdRef.current, staffIds: selectedStaff, leadStaffId: leadStaffId ?? selectedStaff[0] ?? null, note: note.trim() || null }
+    const params = {
+      userId: profile.id,
+      apartmentId: aptId,
+      cleanedAt,
+      clientOpId: clientOpIdRef.current,
+      staffIds: selectedStaff,
+      leadStaffId: leadStaffId ?? selectedStaff[0] ?? null,
+      note: note.trim() || null,
+    }
     try {
-      if (!navigator.onLine) { await queueCleaningOffline(params); setOffline(true); setTimeout(() => goBack(), 1500); return }
+      if (!navigator.onLine) {
+        await queueCleaningOffline(params)
+        setOffline(true)
+        const timer = setTimeout(() => goBack(), 1500)
+        setGoBackTimer(timer)
+        return
+      }
       const res = await completeCleaning(params)
       setResult(res)
       if (res.duplicate) setError(t.cleaning.duplicate)
-      setTimeout(() => goBack(), 1200)
+      const timer = setTimeout(() => goBack(), 1200)
+      setGoBackTimer(timer)
     } catch (e) {
-      try { await queueCleaningOffline(params); setOffline(true); setTimeout(() => goBack(), 1500) } catch { setError(String(e)) }
+      if (isNetworkError(e)) {
+        try {
+          await queueCleaningOffline(params)
+          setOffline(true)
+          const timer = setTimeout(() => goBack(), 1500)
+          setGoBackTimer(timer)
+        } catch {
+          setError(friendlyMessage(e))
+        }
+      } else {
+        setError(friendlyMessage(e))
+      }
     } finally { setSubmitting(false) }
   }
 
@@ -91,6 +141,16 @@ export function CleaningSheet({ backTo }: { backTo?: string }) {
           </button>
         </div>
         <div className="px-5 py-4 space-y-5">
+          {loadError && (
+            <div className="flex items-start gap-2 bg-warn-soft border border-line rounded-xl px-3 py-2.5">
+              <AlertTriangle className="w-4 h-4 text-warn mt-0.5 shrink-0" />
+              <p className="text-sm text-warn flex-1">{loadError}</p>
+              <button onClick={loadReferenceData} className="flex items-center gap-1 text-xs text-warn font-medium shrink-0">
+                <RefreshCw className="w-3.5 h-3.5" />
+                {t.retry}
+              </button>
+            </div>
+          )}
           {needsStaff && (
             <div>
               <label className="block text-sm font-medium text-ink mb-2">{t.cleaning.whoCleaned}</label>
@@ -164,7 +224,9 @@ export function CleaningSheet({ backTo }: { backTo?: string }) {
         </div>
         <div className="sticky bottom-0 bg-surface border-t border-line px-5 py-3 flex gap-3">
           <button onClick={goBack} className="flex-1 bg-app text-ink rounded-xl py-3 font-medium">{t.cleaning.cancel}</button>
-          <button onClick={handleConfirm} disabled={submitting || (needsStaff && selectedStaff.length === 0)}
+          <button
+            onClick={handleConfirm}
+            disabled={submitting || (needsStaff && selectedStaff.length === 0) || !!loadError}
             className="flex-1 bg-accent text-white rounded-xl py-3 font-medium disabled:opacity-40 flex items-center justify-center gap-2">
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {t.cleaning.confirm}
